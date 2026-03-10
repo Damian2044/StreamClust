@@ -21,6 +21,27 @@ import { esErrorCancelado, obtenerMensajeError, traducirMensajeInterfaz } from '
 import { useAbortController } from './hooks/useAbortController';
 import Papa from 'papaparse';
 
+const DELIMITADOR_POR_DEFECTO = "auto";
+const VARIABLES_SELECCIONADAS_INICIALES = { features: [], target: "" };
+const crearParametrosClusterPorDefecto = () => ({
+  k: 3,
+  maxSizes: [10, 10, 10],
+});
+const EXTENSIONES_IMAGEN_PERMITIDAS = new Set([
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'avif',
+  'tif',
+  'tiff',
+  'ico',
+  'heic',
+  'heif',
+]);
 
 function App() {
   const { addError } = useError();
@@ -30,14 +51,16 @@ function App() {
   const [selectedImageIds, setSelectedImageIds] = useState([]);
   const [bulkLabelInput, setBulkLabelInput] = useState('');
   const [tabActiva, setTabActiva] = useState("datasets");
-  const [delimitador, setDelimitador] = useState(",");
+  const [delimitador, setDelimitador] = useState(DELIMITADOR_POR_DEFECTO);
   // visibilidad de la columna izquierda (lotes + configuración)
   const [leftVisible, setLeftVisible] = useState(true);
   const [processedImages, setProcessedImages] = useState([]); // imágenes
   const [datosDataset, setDatosDataset] = useState([]);       // filas de dataset
   const [columnasDataset, setColumnasDataset] = useState([]); // nombres de columnas
-  const [encabezadoDataset, setEncabezadoDataset] = useState(false)
-  const [variablesSeleccionadas, setVariablesSeleccionadas] = useState({ features: [], target: "" });
+  const [encabezadoDataset, setEncabezadoDataset] = useState(true)
+  const [variablesSeleccionadas, setVariablesSeleccionadas] = useState({ ...VARIABLES_SELECCIONADAS_INICIALES });
+  const [variablesPanelVersion, setVariablesPanelVersion] = useState(0);
+  const [panelConfiguracionVersion, setPanelConfiguracionVersion] = useState(0);
   const [datosProcesados, setDatosProcesados] = useState([])
 
   // --- ESTADOS CLUSTERING ---
@@ -57,17 +80,37 @@ function App() {
   const lastSelectedIndexRef = useRef(null); // Índice de la última imagen clicada
   const clusteringSectionRef = useRef(null);
 
+  const liberarPreviews = (items = []) => {
+    items.forEach((item) => {
+      if (typeof item?.previewUrl === 'string') {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+  };
+
   function limpiarDataset() {
 
     setDatosDataset([]);
     setColumnasDataset([]);
     setProcessedImages([]);
+    setEncabezadoDataset(true);
+    setVariablesSeleccionadas({ ...VARIABLES_SELECCIONADAS_INICIALES });
+    setVariablesPanelVersion((prev) => prev + 1);
   }
 
-  const [clusterParams, setClusterParams] = useState({
-    k: 3,
-    maxSizes: [10, 10, 10],
-  });
+  const reiniciarDatosCargados = () => {
+    liberarPreviews([...processedImages, ...datosProcesados]);
+    setBatches([]);
+    setProcessedImages([]);
+    setDatosDataset([]);
+    setColumnasDataset([]);
+    setEncabezadoDataset(true);
+    setDelimitador(DELIMITADOR_POR_DEFECTO);
+    setVariablesSeleccionadas({ ...VARIABLES_SELECCIONADAS_INICIALES });
+    setVariablesPanelVersion((prev) => prev + 1);
+  };
+
+  const [clusterParams, setClusterParams] = useState(() => crearParametrosClusterPorDefecto());
 
   const semillaGlobal = 42;
 
@@ -95,6 +138,35 @@ function App() {
   // --- FUNCIONES AUXILIARES ---
   const generateImageId = (batchId, index) => `b${batchId}-i${index}-${Date.now()}`;
 
+  const esArchivoImagenValido = (file) => {
+    if (!file || typeof file.name !== 'string') {
+      return false;
+    }
+
+    const tipo = String(file.type ?? '').toLowerCase().trim();
+    if (tipo.startsWith('image/')) {
+      return true;
+    }
+
+    const extension = file.name.split('.').pop()?.toLowerCase().trim();
+    return Boolean(extension && EXTENSIONES_IMAGEN_PERMITIDAS.has(extension));
+  };
+
+  const separarArchivosImagenes = (files = []) => {
+    const validos = [];
+    const invalidos = [];
+
+    files.forEach((file) => {
+      if (esArchivoImagenValido(file)) {
+        validos.push(file);
+      } else {
+        invalidos.push(file);
+      }
+    });
+
+    return { validos, invalidos };
+  };
+
   // --- MANEJADORES DE CARGA ---
   const handleFolderSelect = (event) => {
     const files = Array.from(event.target.files || []);
@@ -103,10 +175,22 @@ function App() {
       return;
     }
 
+    const { validos, invalidos } = separarArchivosImagenes(files);
+
+    if (invalidos.length > 0) {
+      addError(`${invalidos.length} non-image file(s) were skipped.`, 'warning');
+    }
+
+    if (validos.length === 0) {
+      addError('Only image files can be loaded in the Images section.', 'warning');
+      event.target.value = null;
+      return;
+    }
+
     // Agrupar por subcarpeta dentro de la carpeta seleccionada
     // Ej: "ecommerce products/jeans/img1.jpg" -> lote "jeans"
     const gruposPorCarpeta = {};
-    for (const file of files) {
+    for (const file of validos) {
       const relativePath = file.webkitRelativePath || file.name;
       const partes = relativePath.split('/');
 
@@ -151,13 +235,24 @@ function App() {
     // Caso imágenes (evento normal)
     if (data?.target?.files) {
       const files = Array.from(data.target.files);
+      const { validos, invalidos } = separarArchivosImagenes(files);
+
+      if (invalidos.length > 0) {
+        addError(`${invalidos.length} non-image file(s) were skipped.`, 'warning');
+      }
+
+      if (validos.length === 0) {
+        addError('Only image files can be loaded in the Images section.', 'warning');
+        data.target.value = null;
+        return;
+      }
 
       const newBatch = {
         id: Date.now(),
-        name: `${files.length} images`,
+        name: `${validos.length} images`,
         type: "imagenes",
-        count: files.length,
-        files,
+        count: validos.length,
+        files: validos,
         label: ""
       };
 
@@ -193,8 +288,20 @@ function App() {
 
     // ---------- IMÁGENES ----------
     if (batch.type === "imagenes") {
+      const { validos, invalidos } = separarArchivosImagenes(batch.files);
+
+      if (invalidos.length > 0) {
+        addError(`${invalidos.length} non-image file(s) were removed from this batch.`, 'warning');
+      }
+
+      if (validos.length === 0) {
+        addError('This batch does not contain valid image files.', 'warning');
+        setBatches((prev) => prev.filter((b) => b.id !== batchId));
+        return;
+      }
+
       const finalLabel = batch.label.trim() === "" ? "Unlabeled" : batch.label;
-      const newGalleryImages = batch.files.map((file, index) => ({
+      const newGalleryImages = validos.map((file, index) => ({
         id: generateImageId(batchId, index),
         file,
         previewUrl: URL.createObjectURL(file),
@@ -241,6 +348,8 @@ function App() {
 
       setColumnasDataset(columnas);
       setProcessedImages(datos);
+      setVariablesSeleccionadas({ ...VARIABLES_SELECCIONADAS_INICIALES });
+      setVariablesPanelVersion((prev) => prev + 1);
     }
     // eliminar lote
     setBatches((prev) => prev.filter((b) => b.id !== batchId));
@@ -288,6 +397,7 @@ function App() {
   };
   const propsModulo = {
     processedImages,
+    datosProcesados,
     idsEnClustering,
     selectedImageIds,
     handleImageClick,
@@ -352,6 +462,22 @@ function App() {
 
   const actualizarEstadoConRespuestaClustering = (punto, respuestaPunto) => {
     const clusterAsignado = obtenerClusterAsignadoValido(respuestaPunto);
+
+    if (tabActiva === "imagen") {
+      setProcessedImages((prev) => prev.filter((img) => img.id !== punto.id));
+      setDatosProcesados((prev) =>
+        prev.some((img) => img.id === punto.id) ? prev : [...prev, punto]
+      );
+      setIdsEnClustering((prev) => {
+        if (!prev[punto.id]) {
+          return prev;
+        }
+
+        const siguiente = { ...prev };
+        delete siguiente[punto.id];
+        return siguiente;
+      });
+    }
 
     if (clusterAsignado !== null) {
       setAsignacionesClusters((prev) => ({ ...prev, [punto.id]: clusterAsignado }));
@@ -461,15 +587,26 @@ function App() {
     lastSelectedIndexRef.current = null;
   };
 
+  const resetPanelConfiguracion = () => {
+    setClusterParams(crearParametrosClusterPorDefecto());
+    setPanelConfiguracionVersion((prev) => prev + 1);
+  };
+
   const detenerEjecucionClustering = () => {
     cancelAll();
     reset();
     resetClusteringRuntimeStates();
   };
 
+  const reiniciarInterfazActual = () => {
+    detenerEjecucionClustering();
+    reiniciarDatosCargados();
+    resetPanelConfiguracion();
+  };
+
   const manejarErrorFatalClustering = (error, fallback = 'The clustering operation could not be completed.') => {
     console.error('Error fatal en clustering:', error);
-    detenerEjecucionClustering();
+    reiniciarInterfazActual();
 
     if (error?.__notified) {
       return;
@@ -480,9 +617,7 @@ function App() {
 
   const resetClusteringStates = () => {
     resetClusteringRuntimeStates();
-    setProcessedImages([]);
-    setColumnasDataset([])
-    setDatosDataset([]);
+    reiniciarDatosCargados();
   };
 
   // --- CAMBIO DE PESTAÑA CON VALIDACIÓN ---
@@ -492,6 +627,7 @@ function App() {
       return;
     }
     resetClusteringStates();
+    resetPanelConfiguracion();
     setTabActiva(newTab);
   };
 
@@ -501,6 +637,7 @@ function App() {
     if (isClustering) {
       addError('Stopping operation...', 'warning', { timeoutMs: 2500 });
       detenerEjecucionClustering();
+      reiniciarDatosCargados();
       return;
     }
 
@@ -774,6 +911,7 @@ function App() {
           datosProcesados={datosProcesados}
           setVariablesSeleccionadas={setVariablesSeleccionadas}
           variablesSeleccionadas={variablesSeleccionadas}
+          variablesPanelVersion={variablesPanelVersion}
           {...propsModulo} />;
 
 
@@ -788,6 +926,7 @@ function App() {
           datosProcesados={datosProcesados}
           setVariablesSeleccionadas={setVariablesSeleccionadas}
           variablesSeleccionadas={variablesSeleccionadas}
+          variablesPanelVersion={variablesPanelVersion}
           {...propsModulo} />;
       default:
         return null;
@@ -847,6 +986,7 @@ function App() {
           />
 
           <PanelConfiguracion
+            resetVersion={panelConfiguracionVersion}
             estaClustering={isClustering}
             parametrosCluster={clusterParams}
             tamaniosIniciales={initialMaxSizes}

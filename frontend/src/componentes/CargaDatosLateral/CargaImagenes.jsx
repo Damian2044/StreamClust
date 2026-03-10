@@ -84,6 +84,7 @@ function CargaImagenes({ onSeleccionCarpeta, onSeleccionMultiple, lotesImagenes,
 
                         <input
                             type="file"
+                            accept="image/*"
                             webkitdirectory="true"
                             directory="true"
                             className="hidden"

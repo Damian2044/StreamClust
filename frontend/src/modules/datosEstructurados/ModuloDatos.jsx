@@ -21,7 +21,8 @@ function ModuloDatos({
     tiemposClustering,
     setVariablesSeleccionadas,
     datosProcesados,
-    variablesSeleccionadas
+    variablesSeleccionadas,
+    variablesPanelVersion
 }) {
     const columnasNumericas = columnasDataset.filter((col, i) =>
         datosDataset.every(fila => typeof fila[i] === "number" && !isNaN(fila[i]))
@@ -52,6 +53,7 @@ function ModuloDatos({
                         columnasNumericas={columnasNumericas}
                         columnasEtiquetas={columnasTarget}
                         onChange={setVariablesSeleccionadas}
+                        resetVersion={variablesPanelVersion}
                         seleccionarTodasLasFeaturesInicialmente={true} />
                 </div>
             </div>

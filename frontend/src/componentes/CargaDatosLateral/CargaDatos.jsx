@@ -48,11 +48,11 @@ function CargaDatos({
                                     onChange={(e) => setDelimitador(e.target.value)}
                                     className="w-full bg-white border border-gray-300 rounded px-2 py-1.5 text-xs"
                                 >
+                                    <option value="auto">Automatic</option>
                                     <option value=",">Comma (,)</option>
                                     <option value=";">Semicolon (;)</option>
                                     <option value="\t">Tab</option>
                                     <option value="|">Pipe (|)</option>
-                                    <option value="auto">Automatic</option>
                                 </select>
                             </div>
                             {/* Encabezado */}

@@ -11,7 +11,8 @@ function VariablesPanel({
     columnasEtiquetas = [],
     onChange,
     soloUnaFeature = false,
-    seleccionarTodasLasFeaturesInicialmente = false
+    seleccionarTodasLasFeaturesInicialmente = false,
+    resetVersion = 0
 }) {
     const obtenerFeaturesIniciales = () => {
         if (soloUnaFeature) {
@@ -31,6 +32,14 @@ function VariablesPanel({
     const [featurePendiente, setFeaturePendiente] = useState("");
     const featuresDisponibles = columnasNumericas.filter((c) => !features.includes(c) && c !== target);
     const targetsDisponibles = columnasEtiquetas.filter((col) => !features.includes(col));
+
+    useEffect(() => {
+        const iniciales = obtenerFeaturesIniciales();
+        setFeatures(iniciales);
+        setTarget("");
+        setFeaturePendiente("");
+        onChange?.({ features: iniciales, target: "" });
+    }, [resetVersion]);
 
     useEffect(() => {
         if (columnasNumericas.length === 0) {

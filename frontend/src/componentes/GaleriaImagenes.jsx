@@ -43,7 +43,10 @@ function GaleriaImagenes({
         </button>
       </div>
 
-      {abierta && (
+      <div
+        className={`transition-all duration-500 ease-in-out overflow-hidden ${abierta ? 'max-h-[30rem] opacity-100' : 'max-h-0 opacity-0 pointer-events-none'
+          }`}
+      >
         <div
           className="max-h-[420px] overflow-y-auto custom-scrollbar p-6 bg-gray-100/50 relative"
           onClick={onClickFondo}
@@ -113,7 +116,7 @@ function GaleriaImagenes({
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

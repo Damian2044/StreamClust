@@ -2,6 +2,7 @@ import React from 'react';
 import { ExclamationTriangleIcon, LockClosedIcon } from '@heroicons/react/24/outline';
 
 function PanelConfiguracion({
+  resetVersion,
   estaClustering,
   parametrosCluster,
   tamaniosIniciales,
@@ -14,6 +15,10 @@ function PanelConfiguracion({
 }) {
   const [tamanoComun, setTamanoComun] = React.useState('100');
   const EstadoIcono = estaClustering ? LockClosedIcon : ExclamationTriangleIcon;
+
+  React.useEffect(() => {
+    setTamanoComun('100');
+  }, [resetVersion]);
 
   return (
     <aside className="w-80 border-l border-slate-200 flex flex-col shrink-0 z-20 ">

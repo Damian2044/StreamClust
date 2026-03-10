@@ -20,7 +20,8 @@ function ModuloTexto({
     tiemposClustering,
     setVariablesSeleccionadas,
     datosProcesados,
-    variablesSeleccionadas
+    variablesSeleccionadas,
+    variablesPanelVersion
 }) {
     const columnasTexto = columnasDataset.filter((col, i) =>
         datosDataset.some(fila => {
@@ -54,6 +55,7 @@ function ModuloTexto({
                         columnasNumericas={columnasTexto}
                         columnasEtiquetas={columnasTarget}
                         onChange={setVariablesSeleccionadas}
+                        resetVersion={variablesPanelVersion}
                         soloUnaFeature={true} />
                 </div>
             </div>

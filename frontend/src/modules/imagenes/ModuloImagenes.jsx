@@ -7,6 +7,7 @@ import PanelClustersImagenes from "../../componentes/PanelClustersImagenes"
 function ModuloImagenes({
     titulo_Galeria,
     processedImages,
+    datosProcesados,
     idsEnClustering,
     selectedImageIds,
     handleImageClick,
@@ -39,7 +40,7 @@ function ModuloImagenes({
                 onLimpiarTodo={() => setProcessedImages([])}
             />
             <GraficaClusters clusters={clusters}
-                totalInstancias={processedImages.length}
+                totalInstancias={processedImages.length + datosProcesados.length}
                 procesadas={eventosClustering.length}
                 ultimoCluster={ultimo_cluster}
             />
@@ -51,7 +52,7 @@ function ModuloImagenes({
             <PanelEventosClustering eventos={eventosClustering} />
 
             <PanelClustersImagenes
-                imagenesProcesadas={processedImages}
+                imagenesProcesadas={datosProcesados}
                 asignacionesClusters={asignacionesClusters}
                 tiemposClustering={tiemposClustering}
                 cantidadClusters={clusterParams.k}

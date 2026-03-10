@@ -153,7 +153,8 @@ function PanelClustersImagenes({ imagenesProcesadas, asignacionesClusters, tiemp
           )}
         </div>
       </div>
-      {abierto && (
+      <div className={`transition-all duration-500 ease-in-out overflow-hidden ${abierto ? 'max-h-[72rem] opacity-100' : 'max-h-0 opacity-0 pointer-events-none'
+        }`}>
         <div className="p-5 space-y-5 bg-white text-sm">
           {cantidadClusters <= 0 ? (
             <p className="text-gray-600 font-medium">Set k &gt; 0 to view clusters.</p>
@@ -213,80 +214,80 @@ function PanelClustersImagenes({ imagenesProcesadas, asignacionesClusters, tiemp
                 </div>
               </div>
 
-              {clusterSeleccionado !== null && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                  <div className="bg-white border border-gray-300 rounded-2xl shadow-2xl max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden">
-                    <div className="h-12 px-5 border-b border-gray-200 flex items-center justify-between bg-gray-50 shrink-0">
-                      <div>
-                        <span className="text-sm font-bold text-gray-900 mr-2 inline-flex items-center gap-1.5">
-                          <span
-                            className="w-2.5 h-2.5 rounded-full"
-                            style={{ backgroundColor: paleta[clusterSeleccionado % paleta.length] }}
-                          />
-                          Cluster {clusterSeleccionado}
-                        </span>
-                        <span className="text-xs text-gray-600">
-                          Images assigned to this cluster
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {MOSTRAR_DESCARGA_ZIP && (
-                          <button
-                            type="button"
-                            className={`text-xs font-semibold px-2.5 py-1 rounded border transition-colors ${descargandoZip
-                              ? 'border-gray-300 text-gray-400 cursor-not-allowed bg-gray-50'
-                              : 'border-gray-300 text-gray-700 hover:bg-gray-100'
-                              }`}
-                            onClick={descargarClusterSeleccionado}
-                            disabled={descargandoZip}
-                          >
-                            {descargandoZip ? 'Generating...' : 'Download ZIP'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors"
-                          onClick={() => setClusterSeleccionado(null)}
-                        >
-                          <XMarkIcon className="w-3.5 h-3.5" />
-                          Exit
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
-                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {obtenerImagenesCluster(clusterSeleccionado).map((img) => (
-                          <div
-                            key={img.id}
-                            className="bg-white border border-gray-300 rounded overflow-hidden flex flex-col items-center p-2 hover:bg-gray-50 transition-colors"
-                          >
-                            <div className="w-full h-28 overflow-hidden flex items-center justify-center bg-gray-100">
-                              <img
-                                src={img.previewUrl}
-                                 alt={img.file?.name || 'image'}
-                                className="max-w-full max-h-full object-contain"
-                              />
-                            </div>
-                            <p className="text-[11px] text-gray-700 truncate w-full text-center" title={img.file?.name}>
-                              {img.file?.name}
-                            </p>
-                            <p className="text-[11px] truncate w-full text-center font-medium py-1" style={{ color: paleta[clusterSeleccionado % paleta.length] }} title={img.label}>
-                              {img.label}
-                            </p>
-                          </div>
-                        ))}
-                        {obtenerImagenesCluster(clusterSeleccionado).length === 0 && (
-                          <p className="text-sm text-gray-600 col-span-full">
-                            No images have been assigned to this cluster yet.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </>
           )}
+        </div>
+      </div>
+      {abierto && clusterSeleccionado !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white border border-gray-300 rounded-2xl shadow-2xl max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="h-12 px-5 border-b border-gray-200 flex items-center justify-between bg-gray-50 shrink-0">
+              <div>
+                <span className="text-sm font-bold text-gray-900 mr-2 inline-flex items-center gap-1.5">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: paleta[clusterSeleccionado % paleta.length] }}
+                  />
+                  Cluster {clusterSeleccionado}
+                </span>
+                <span className="text-xs text-gray-600">
+                  Images assigned to this cluster
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {MOSTRAR_DESCARGA_ZIP && (
+                  <button
+                    type="button"
+                    className={`text-xs font-semibold px-2.5 py-1 rounded border transition-colors ${descargandoZip
+                      ? 'border-gray-300 text-gray-400 cursor-not-allowed bg-gray-50'
+                      : 'border-gray-300 text-gray-700 hover:bg-gray-100'
+                      }`}
+                    onClick={descargarClusterSeleccionado}
+                    disabled={descargandoZip}
+                  >
+                    {descargandoZip ? 'Generating...' : 'Download ZIP'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors"
+                  onClick={() => setClusterSeleccionado(null)}
+                >
+                  <XMarkIcon className="w-3.5 h-3.5" />
+                  Exit
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {obtenerImagenesCluster(clusterSeleccionado).map((img) => (
+                  <div
+                    key={img.id}
+                    className="bg-white border border-gray-300 rounded overflow-hidden flex flex-col items-center p-2 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="w-full h-28 overflow-hidden flex items-center justify-center bg-gray-100">
+                      <img
+                        src={img.previewUrl}
+                        alt={img.file?.name || 'image'}
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-700 truncate w-full text-center" title={img.file?.name}>
+                      {img.file?.name}
+                    </p>
+                    <p className="text-[11px] truncate w-full text-center font-medium py-1" style={{ color: paleta[clusterSeleccionado % paleta.length] }} title={img.label}>
+                      {img.label}
+                    </p>
+                  </div>
+                ))}
+                {obtenerImagenesCluster(clusterSeleccionado).length === 0 && (
+                  <p className="text-sm text-gray-600 col-span-full">
+                    No images have been assigned to this cluster yet.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
