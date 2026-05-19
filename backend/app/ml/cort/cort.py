@@ -1,350 +1,383 @@
+from __future__ import annotations
+
 import numpy as np
+
+
 class CORT:
     _EPSILON: float = 1e-12
-    _C_SIGMA: float = 3.0
     _ETIQUETA_ERROR: int = -1
 
     def __init__(self, k: int, cardinalidades: list | np.ndarray):
+        if int(k) <= 0:
+            raise ValueError("k must be > 0")
         if len(cardinalidades) != k:
-            raise ValueError(f"len(cardinalidades)={len(cardinalidades)} must be equal to k={k}")
-        if any(e <= 0 for e in cardinalidades):
+            raise ValueError(
+                f"len(cardinalidades)={len(cardinalidades)} must be equal to k={k}"
+            )
+
+        self.k = int(k)
+        self.cardinalidades = np.asarray(cardinalidades, dtype=np.int64)
+        if np.any(self.cardinalidades <= 0):
             raise ValueError("All cardinalidades values must be > 0")
-        
-        self.k = k
-        self.cardinalidades = np.array(cardinalidades, dtype=int)
-        self.totalPuntos:    int  = sum(cardinalidades)
-        
 
-        # Escala FFT online (máximo histórico de dt CAPADO)
-        self._dmax_historico = 0.0
+        self.totalPuntos = int(self.cardinalidades.sum())
+        self._lambda_denominador = float(np.log1p(max(self.totalPuntos, 1) / self.k))
+        self._cardinalidades_float = self.cardinalidades.astype(float)
 
+        self.centroides = np.zeros((self.k, 0), dtype=float)
+        self.fundados = np.zeros(self.k, dtype=bool)
+        self.cupoRestante = self.cardinalidades.copy()
+        self._conteo = np.zeros(self.k, dtype=np.int64)
 
-        # Estado de los clusters
-        self.centroides: np.ndarray = np.zeros((k, 0), dtype=float)  # Se inicializa con 0 columnas, se ajustará al primer punto
-        self.KFundados: int = 0
-        self.cupoRestante    = np.array(cardinalidades, dtype=int)  # Cupo restante para cada cluster
+        self.KFundados = 0
         self.totalProcesados = 0
+        self._historial_fundaciones: list[int] = []
 
+        self._delta_min_contador = 0
+        self._delta_min_media = 0.0
 
-        # Welford sobre distancias máximas reales(Media y varianza para calcular cap_pre = mu_pre + 3*sigma_pre)
-        self._dtContador: int = 0
-        self._dtMedia: float = 0.0
-        self._dtM2: float = 0.0
+        self._activo_mask = np.zeros(self.k, dtype=bool)
+        self._vacio_mask = np.ones(self.k, dtype=bool)
+        self._activos_idx = np.empty(0, dtype=np.int64)
+        self._vacios_idx = np.arange(self.k, dtype=np.int64)
+        self._activos_sucios = False
+        self._vacios_sucios = False
+
+        self._masa_activa_total = 0.0
+        self._capacidad_activa_total = 0.0
 
     @property
-    def conteo(self) -> np.ndarray:# Conteo actual de puntos asignados a cada cluster, calculado como cardinalidades - cupoRestante
-        return self.cardinalidades - self.cupoRestante
-       
-    # ─────────────────────────────────────────────────────────────────────────
-    # WELFORD (dt REAL) + CAP PRE (mu + 3 sigma)
-    # ─────────────────────────────────────────────────────────────────────────
+    def conteo(self) -> np.ndarray:
+        return self._conteo
 
-    def _actualizar_media_m2_dt(self, dt_real: float):
-        """Actualiza la media y M2 de Welford con el nuevo valor real de dt (distancia mínima máxima)"""
-        self._dtContador += 1
-        delta = dt_real - self._dtMedia #Diferencia entre el nuevo valor y la media actual
-        self._dtMedia += delta / self._dtContador #Actualización de la media
-        self._dtM2   += delta * (dt_real - self._dtMedia) #Actualización de M2, que es la suma de los cuadrados de las diferencias
+    @property
+    def historialFundaciones(self) -> list[int]:
+        return list(self._historial_fundaciones)
 
-    def _obtener_sigmaDt_pre(self) -> float:
-        """Calcula el sigmaDt utilizando la desviación estándar de las distancias máximas reales, previas"""
-        if self._dtContador < 2:
-            return 0.0
-        return float(np.sqrt(max(self._dtM2 / (self._dtContador - 1), 0.0)))
-    
-    def _capDt_pre(self) -> float:
-        """Calcula el capDt_pre utilizando la media y el sigma de las distancias máximas reales previas"""
-        # cap = mu_pre + 3*sigma_pre, calculado PRE (sin incluir dt actual)
-        if self._dtContador < 2:
+    def _asegurar_dimensionalidad(self, punto: np.ndarray) -> bool:
+        if self.centroides.shape[1] == 0:
+            self.centroides = np.zeros((self.k, punto.shape[0]), dtype=float)
+            return True
+        return int(self.centroides.shape[1]) == int(punto.shape[0])
+
+    def _indices_activos(self) -> np.ndarray:
+        if self._activos_sucios:
+            self._activos_idx = np.flatnonzero(self._activo_mask)
+            self._activos_sucios = False
+        return self._activos_idx
+
+    def _indices_vacios(self) -> np.ndarray:
+        if self._vacios_sucios:
+            self._vacios_idx = np.flatnonzero(self._vacio_mask)
+            self._vacios_sucios = False
+        return self._vacios_idx
+
+    def _seleccionar_primer_cluster_vacio(self) -> int | None:
+        vacios = self._indices_vacios()
+        if vacios.size == 0:
+            return None
+
+        capacidades = self.cardinalidades[vacios]
+        return int(vacios[int(np.argmax(capacidades))])
+
+    def _costo_capacidad_log_vector(
+        self,
+        cupos_actuales: np.ndarray,
+        puntos_restantes: int,
+    ) -> np.ndarray:
+        if puntos_restantes <= 0:
+            return np.zeros(cupos_actuales.shape, dtype=float)
+
+        ratios = cupos_actuales.astype(float) / float(puntos_restantes)
+        ratios = np.clip(ratios, self._EPSILON, 1.0)
+        return -np.log(ratios)
+
+    def _costo_estructura_log(self, puntos_restantes: int) -> float:
+        por_fundar = self.k - self.KFundados
+        if por_fundar <= 0:
             return float("inf")
-        sigma = self._obtener_sigmaDt_pre()
-        return float(self._dtMedia + self._C_SIGMA * sigma)
-    
-    def _actualizar_escala_fft(self, dt_real: float):
-        """
-        Orden correcto:
-          1) cap_pre = mu_pre + 3*sigma_pre   (histórico)
-          2) dCap    = min(dt_real, cap_pre)
-          3) DmaxGeom = max(DmaxGeom, dCap)
-          4) Welford.update(dt_real)          (ahora sí incorporas el valor real)
-        """
-        if not np.isfinite(dt_real) or dt_real < 0:
+
+        prob_fundar = float(por_fundar) / float(max(puntos_restantes, 1))
+        prob_fundar = float(np.clip(prob_fundar, self._EPSILON, 1.0))
+        return -float(np.log(prob_fundar))
+
+    def _referencia_geometrica(self, delta_min: float) -> float:
+        if self._delta_min_contador <= 0:
+            return max(float(delta_min), self._EPSILON)
+        return float(max(self._delta_min_media, self._EPSILON))
+
+    def _lambda_global(self, delta_min: float) -> float:
+        referencia = self._referencia_geometrica(delta_min)
+        return float(referencia / self._lambda_denominador)
+
+    def _actualizar_delta_min(self, delta_min: float) -> None:
+        if not np.isfinite(delta_min) or delta_min < 0.0:
             return
 
-        cap_pre = self._capDt_pre() # Calcula el cap o límite previo basado en la media y desviación estándar de las distancias máximas reales anteriores
-        dcap = min(dt_real, cap_pre)
+        self._delta_min_contador += 1
+        self._delta_min_media += (
+            float(delta_min) - self._delta_min_media
+        ) / float(self._delta_min_contador)
 
-        if dcap > self._dmax_historico:
-            self._dmax_historico = dcap
+    def _deltas_activos(self, punto: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        activos = self._indices_activos()
+        if activos.size == 0:
+            return activos, np.empty(0, dtype=float)
 
-        self._actualizar_media_m2_dt(dt_real) # Actualiza la media y M2 con el nuevo valor real de dt o distancia mínima máxima (capada)
+        diferencias = self.centroides[activos] - punto
+        deltas = np.sqrt(np.sum(diferencias * diferencias, axis=1))
+        return activos, deltas
 
-    
-    def _debe_fundarFFT(self, dMin_cupo: float, dmax_anterior: float) -> bool:
-        t = self.totalProcesados
-        N = self.totalPuntos
-        umbral = (1.0 - np.sqrt((float(t) / float(N)))) * float(dmax_anterior)
+    def _mejor_asignacion(
+        self,
+        activos: np.ndarray,
+        deltas: np.ndarray,
+        lambda_t: float,
+        puntos_restantes: int,
+    ) -> tuple[int | None, float, float]:
+        if activos.size == 0:
+            return None, float("inf"), 0.0
 
-        return float(dMin_cupo) > umbral
+        phi_cap = self._costo_capacidad_log_vector(
+            self.cupoRestante[activos],
+            puntos_restantes,
+        )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # UTILIDADES GEOMÉTRICAS
-    # ─────────────────────────────────────────────────────────────────────────
-    def _distancia_euclidiana(self, a: np.ndarray, b: np.ndarray) -> float:
-        return float(np.linalg.norm(a - b))
-    
+        if activos.size <= 1:
+            phi_load = np.zeros_like(deltas)
+        else:
+            conteos_activos = self._conteo[activos].astype(float)
+            masa_total = self._masa_activa_total
+            capacidad_total = self._capacidad_activa_total
 
-    def _distancias_minimas(self, punto: np.ndarray) -> tuple:
-        """
-        Devuelve:
-          dMin_cupo  : distancia al más cercano CON cupo  (decisión/asignación)
-          jCercano   : índice del más cercano CON cupo (None si todos llenos)
-          dMin_todos : distancia al más cercano SIN filtro (escala dt)
-        """
-        if self.KFundados <= 0:
-            return float("inf"), None, float("inf")
-        
-        
-        C = self.centroides[: self.KFundados] # Solo considera los centroides fundados hasta ahora
-        diferencias = C - punto
-        distancias = np.linalg.norm(diferencias, axis=1) # Distancia euclidiana a cada centroide fundado (sin filtro de cupo)
+            if capacidad_total <= 0.0:
+                phi_load = np.zeros_like(deltas)
+            else:
+                cuota_ideal = self._cardinalidades_float[activos] / max(
+                    capacidad_total,
+                    self._EPSILON,
+                )
+                cuota_despues = (conteos_activos + 1.0) / max(
+                    masa_total + 1.0,
+                    self._EPSILON,
+                )
+                ratio = cuota_despues / np.maximum(cuota_ideal, self._EPSILON)
+                ratio = np.clip(ratio, self._EPSILON, 1.0 / self._EPSILON)
+                phi_load = np.log(ratio)
 
+        costos = deltas + lambda_t * (phi_cap + phi_load)
+        posicion = int(np.argmin(costos))
+        return (
+            int(activos[posicion]),
+            float(costos[posicion]),
+            float(deltas[posicion]),
+        )
 
-        # dMin de todos sin filtrar por cupo
-        indice_min = np.argmin(distancias)
-        dMin_todos = float(distancias[indice_min])
+    def _mejor_fundacion(
+        self,
+        puntos_restantes: int,
+        lambda_t: float,
+        indice_ganador: int | None,
+        delta_ganador: float,
+    ) -> tuple[int | None, float]:
+        vacios = self._indices_vacios()
+        if vacios.size == 0:
+            return None, float("inf")
 
-        # dMin al más cercano CON cupo
-        mascara_cupo = self.cupoRestante[: self.KFundados] > 0
-        if not np.any(mascara_cupo):
-            return float("inf"), None, dMin_todos
+        costo_base = lambda_t * self._costo_estructura_log(puntos_restantes)
+        phi_cap = self._costo_capacidad_log_vector(
+            self.cupoRestante[vacios],
+            puntos_restantes,
+        )
 
-        distancias_con_cupo = np.where(mascara_cupo, distancias, float("inf"))
-        indice_min_cupo = np.argmin(distancias_con_cupo)
-        dMin_cupo = float(distancias_con_cupo[indice_min_cupo])
-        jCercano = int(indice_min_cupo)
+        if indice_ganador is None or indice_ganador < 0 or indice_ganador >= self.k:
+            utilidad = np.zeros(vacios.shape, dtype=float)
+        else:
+            n_g = int(self._conteo[indice_ganador])
+            factor_madurez = float(max(n_g - 1, 0)) / float(max(n_g + 1, 1))
+            masa_futura = self._cardinalidades_float[vacios] / float(
+                max(puntos_restantes, 1)
+            )
+            utilidad = float(max(delta_ganador, 0.0)) * factor_madurez * masa_futura
 
-        return dMin_cupo, jCercano, dMin_todos
-   
-    
-    # ─────────────────────────────────────────────────────────────────────────
-    # Actualización de centroides
-    # ─────────────────────────────────────────────────────────────────────────
-    def _actualizar_centroide(self, id: int, punto: np.ndarray):
-        n_actual = int(self.cardinalidades[id] - self.cupoRestante[id])
-        n_nuevo = n_actual + 1
-        alpha   = 1.0 / (1.0 + np.sqrt(n_nuevo))
-        self.centroides[id]   += alpha * (punto - self.centroides[id])
-        # AQUÍ se actualiza el conteo indirectamente a través de cupoRestante, ya que conteo = cardinalidades - cupoRestante
-        self.cupoRestante[id] -= 1
+        costos = costo_base + lambda_t * phi_cap - utilidad
+        posicion = int(np.argmin(costos))
+        return int(vacios[posicion]), float(costos[posicion])
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # FUNDAR CLUSTER/GRUPO
-    # ─────────────────────────────────────────────────────────────────────────
-
-
-    
-    def _fundar_cluster(self, punto: np.ndarray) -> int:
-        indice = self.KFundados
-        if self.cupoRestante[indice] <= 0:
+    def _fundar_cluster(self, punto: np.ndarray, indice: int) -> int:
+        if indice < 0 or indice >= self.k:
+            return self._ETIQUETA_ERROR
+        if self.fundados[indice] or self.cupoRestante[indice] <= 0:
             return self._ETIQUETA_ERROR
 
         self.centroides[indice] = punto.copy()
-        # Consumir un cupo del nuevo cluster fundado (equivalente a asignar el punto fundador a ese cluster)
-        self.cupoRestante[indice] -= 1
+        self.fundados[indice] = True
         self.KFundados += 1
-        
+        self.cupoRestante[indice] -= 1
+        self._conteo[indice] += 1
+        self._historial_fundaciones.append(int(self.totalProcesados))
 
-        # Cuando ya existen 2 centros, escala inicial = distancia entre ellos
-        if self.KFundados == 2:
-            d = float(self._distancia_euclidiana(self.centroides[0], self.centroides[1]))
-            self._dmax_historico = d
-            self._actualizar_media_m2_dt(d)
+        self._vacio_mask[indice] = False
+        self._vacios_sucios = True
 
-        return indice
-    
+        if self.cupoRestante[indice] > 0:
+            self._activo_mask[indice] = True
+            self._activos_sucios = True
+            self._masa_activa_total += 1.0
+            self._capacidad_activa_total += float(self.cardinalidades[indice])
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # ASIGNACIÓN — con penalización por llenado
-    # ─────────────────────────────────────────────────────────────────────────
+        return int(indice)
 
-    def _asignarConCapacidad(self, punto: np.ndarray) -> int:
-        totalFundados = self.KFundados
-        if totalFundados <= 0:
+    def _asignar_cluster(self, indice: int, punto: np.ndarray) -> int:
+        if not self.fundados[indice] or self.cupoRestante[indice] <= 0:
             return self._ETIQUETA_ERROR
-        
-        # Filtrar solo los clusters fundados y con cupo restante
-        cupo = self.cupoRestante[:totalFundados]
-        mascara_cupo = cupo > 0
 
-        if not np.any(mascara_cupo):
-            return self._ETIQUETA_ERROR
-        
-        centroides_activos = self.centroides[:totalFundados]
-        distancias = np.linalg.norm(centroides_activos - punto, axis=1)
+        n_actual = int(self._conteo[indice])
+        self.centroides[indice] += (punto - self.centroides[indice]) / float(
+            n_actual + 1
+        )
+        self.cupoRestante[indice] -= 1
+        self._conteo[indice] += 1
 
-        # Si solo hay un cluster con cupo, asignar directamente a ese
-        if np.count_nonzero(mascara_cupo) == 1:
-            cluster = np.flatnonzero(mascara_cupo)[0] # Índice del único cluster con cupo
-            self._actualizar_centroide(cluster, punto)
-            return cluster
+        self._masa_activa_total += 1.0
+        if self.cupoRestante[indice] <= 0:
+            self._activo_mask[indice] = False
+            self._activos_sucios = True
+            self._capacidad_activa_total -= float(self.cardinalidades[indice])
+            self._masa_activa_total -= float(self._conteo[indice])
 
+        return int(indice)
 
-        # Análisis de candidatos con cupo: distancia + penalización por llenado
-        distancias_candidatos = distancias[mascara_cupo]
-        indices_candidatos = np.flatnonzero(mascara_cupo)   
+    def _recalcular_estado_derivado(self) -> None:
+        self.KFundados = int(np.count_nonzero(self.fundados))
+        self._vacio_mask = ~self.fundados
+        self._activo_mask = self.fundados & (self.cupoRestante > 0)
 
-        escala = max(float(np.median(distancias_candidatos)), self._EPSILON)
+        self._activos_idx = np.flatnonzero(self._activo_mask)
+        self._vacios_idx = np.flatnonzero(self._vacio_mask)
+        self._activos_sucios = False
+        self._vacios_sucios = False
 
-
-        # d1 y d2 para margen de ambigüedad, (si hay al menos 2 candidatos)
-        dos_primeros = np.partition(distancias_candidatos, 1)[:2] # Obtiene las dos distancias más pequeñas entre los candidatos con cupo
-        d1 = float(dos_primeros[0]) # Distancia al candidato más cercano con cupo
-        d2 = float(dos_primeros[1]) # Distancia al segundo candidato con cupo
-
-        ambiguedad = float(d1 / d2) if d2 > self._EPSILON else 1.0
-
-        # penalización por llenado: cuanto más lleno, mayor penalización (función logarítmica suave)
-        cardinalidades_candidatos =  np.asarray(self.cardinalidades, dtype=float)[:totalFundados][mascara_cupo]
-        cupo_restante_candidatos = cupo[mascara_cupo].astype(float)
-
-        llenado = (cardinalidades_candidatos - cupo_restante_candidatos) / cardinalidades_candidatos
-        llenado = np.clip(llenado, 0.0, 1.0 - self._EPSILON)
-        phi = - np.log(1.0 - llenado) # Penalización por llenado, función logarítmica suave que crece a medida que el llenado se acerca al 100%
-
-        penalizacion = ambiguedad * escala * phi
-
-        Ti = distancias_candidatos + penalizacion
-
-        indice_menor_Ti = np.argmin(Ti)
-        mejorGrupo = int(indices_candidatos[indice_menor_Ti])
-
-        self._actualizar_centroide(mejorGrupo, punto)
-        return mejorGrupo
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PROCESAMIENTO DE PUNTOS
-    # ─────────────────────────────────────────────────────────────────────────
-
+        self._masa_activa_total = float(np.sum(self._conteo[self._activo_mask]))
+        self._capacidad_activa_total = float(np.sum(self.cardinalidades[self._activo_mask]))
+        self.totalPuntos = int(self.cardinalidades.sum())
+        self._lambda_denominador = float(np.log1p(max(self.totalPuntos, 1) / self.k))
+        self._cardinalidades_float = self.cardinalidades.astype(float)
 
     def procesarPunto(self, punto) -> int:
         try:
-            punto = np.asarray(punto, dtype=float)
+            punto = np.asarray(punto, dtype=float).reshape(-1)
+            if not np.all(np.isfinite(punto)):
+                return self._ETIQUETA_ERROR
+            if not self._asegurar_dimensionalidad(punto):
+                return self._ETIQUETA_ERROR
 
-            # inicializar centroides para que tengan la dimensión correcta al procesar el primer punto
-            if self.centroides.shape[1] == 0:
-                self.centroides = np.zeros((self.k, punto.shape[0]), dtype=float)
+            if self.totalProcesados >= self.totalPuntos:
+                return self._ETIQUETA_ERROR
 
+            puntos_restantes = self.totalPuntos - self.totalProcesados
+            delta_min = None
 
-
-            etiqueta = self._ETIQUETA_ERROR
-
-            # FASE 1: fundación (decidir fundar nuevo grupo o absorber en el más cercano con cupo)
-
-            if self.KFundados < self.k:               
-                if self.KFundados < 2: # p1 y p2 siempre fundan los 2 primeros clusters, luego se asigna con capacidad
-                    etiqueta = self._fundar_cluster(punto)
-                    if etiqueta != self._ETIQUETA_ERROR:
-                        self.totalProcesados += 1
-                    return etiqueta
-
-                # desde p3: calcular distancias y actualizar escala FFT
-                dMin_cupo, jCercano, dt = self._distancias_minimas(punto)
-                dMax_anterior = self._dmax_historico # congelar Dmax PRE para decidir (esto es importante)
-
-
-                # actualizar escala FFT online con dt (cada punto, funda o no)
-                self._actualizar_escala_fft(dt)
-
-                if jCercano is None: # si todos llenos → fundar obligatoriamente
-                    etiqueta = self._fundar_cluster(punto)
-                
-                # decisión FFT con Dmax PRE (congelado antes de actualizar con dt actual)
-                elif self._debe_fundarFFT(dMin_cupo, dMax_anterior):
-                    etiqueta = self._fundar_cluster(punto)
-                else:
-                    etiqueta = self._asignarConCapacidad(punto)
-            
-             # FASE 2: asignación (score lagrangiano suave con penalización por llenado)
+            if self.KFundados == 0:
+                primer_vacio = self._seleccionar_primer_cluster_vacio()
+                etiqueta = (
+                    self._fundar_cluster(punto, int(primer_vacio))
+                    if primer_vacio is not None
+                    else self._ETIQUETA_ERROR
+                )
             else:
-                etiqueta = self._asignarConCapacidad(punto)
+                activos, deltas = self._deltas_activos(punto)
+                if activos.size == 0:
+                    vacios = self._indices_vacios()
+                    etiqueta = (
+                        self._fundar_cluster(punto, int(vacios[0]))
+                        if vacios.size > 0
+                        else self._ETIQUETA_ERROR
+                    )
+                else:
+                    posicion_cercano = int(np.argmin(deltas))
+                    indice_cercano = int(activos[posicion_cercano])
+                    delta_cercano = float(deltas[posicion_cercano])
+                    delta_min = delta_cercano
+                    lambda_t = self._lambda_global(delta_min)
+
+                    indice_asignar, costo_asignar, _ = self._mejor_asignacion(
+                        activos,
+                        deltas,
+                        lambda_t,
+                        puntos_restantes,
+                    )
+                    indice_fundar, costo_fundar = self._mejor_fundacion(
+                        puntos_restantes,
+                        lambda_t,
+                        indice_cercano,
+                        delta_cercano,
+                    )
+
+                    if indice_asignar is None:
+                        etiqueta = (
+                            self._fundar_cluster(punto, int(indice_fundar))
+                            if indice_fundar is not None
+                            else self._ETIQUETA_ERROR
+                        )
+                    elif indice_fundar is not None and costo_fundar < costo_asignar:
+                        etiqueta = self._fundar_cluster(punto, int(indice_fundar))
+                    else:
+                        etiqueta = self._asignar_cluster(int(indice_asignar), punto)
 
             if etiqueta != self._ETIQUETA_ERROR:
+                if delta_min is not None:
+                    self._actualizar_delta_min(delta_min)
                 self.totalProcesados += 1
 
-            return etiqueta          
+            return etiqueta
         except Exception as e:
             print(f"Error al procesar el punto {punto}: {e}")
             return self._ETIQUETA_ERROR
 
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # OTRAS UTILIDADES (actualizar los tamaños de los arrays si se cambia k o cardinalidades después de la inicialización)
-    # ─────────────────────────────────────────────────────────────────────────
     def actualizar_tamanios_maximos(self, cardinalidades_nuevas):
         """
-        Actualiza los tamaños máximos de los clusters.
+        Actualiza las cardinalidades maximas sin cambiar asignaciones previas.
 
         Reglas:
         - La longitud debe coincidir con k.
-        - Ningún tamaño nuevo puede ser menor que el tamaño actual (conteo).
-        - La actualización es atómica: si hay error no se cambia nada.
+        - Todos los tamanios deben ser positivos.
+        - Ningun tamanio nuevo puede ser menor que el conteo ya asignado.
+        - La actualizacion es atomica: si falla, no cambia el estado.
         """
         try:
-            cardinalidades_nuevas = np.asarray(cardinalidades_nuevas, dtype=int)
-            # validar longitud
-            if cardinalidades_nuevas.ndim != 1 or cardinalidades_nuevas.shape[0] != self.k:
+            nuevas = np.asarray(cardinalidades_nuevas, dtype=np.int64).reshape(-1)
+
+            if nuevas.ndim != 1 or nuevas.shape[0] != self.k:
                 return {
                     "success": False,
-                    "message": f"Error: cardinalidades_nuevas length ({cardinalidades_nuevas.shape[0]}) does not match k ({self.k}).",
-                    "data": None
+                    "message": f"Error: cardinalidades_nuevas length ({nuevas.shape[0]}) does not match k ({self.k}).",
+                    "data": None,
                 }
-            
-            # validar valores positivos
-            if np.any(cardinalidades_nuevas <= 0):
+
+            if np.any(nuevas <= 0):
                 return {
                     "success": False,
                     "message": "Error: all sizes must be greater than 0.",
-                    "data": None
+                    "data": None,
                 }
 
-            # cardinalidades máximas actuales 
-            cardinalidades_actuales = self.cardinalidades
-            # 1) Validar que los nuevos tamaños no sean menores que las cardinalidades actuales
-            mascara_cardinalidades_iniciales = cardinalidades_nuevas < cardinalidades_actuales
-            if np.any(mascara_cardinalidades_iniciales):
-                idxs_problematicos = np.where(mascara_cardinalidades_iniciales)[0]
+            conteo_actual = self._conteo.copy()
+            if np.any(nuevas < conteo_actual):
+                idxs_problematicos = np.where(nuevas < conteo_actual)[0]
                 detalles = [
-                    f"Cluster {idx}: nuevo tamaño {cardinalidades_nuevas[idx]} < actual {cardinalidades_actuales[idx]}"
-                    for idx in idxs_problematicos
-                ]
-                return {
-                    "success": False,
-                    "message": "Error: new sizes cannot be smaller than the current cardinalities.",
-                    "data": detalles
-                }
-
-            # 2) Validar que los nuevos tamaños no sean menores que el conteo actual (puntos asignados)
-            conteo_actual = self.conteo.copy()
-            if np.any(cardinalidades_nuevas < conteo_actual):
-                idxs_problematicos  = np.where(cardinalidades_nuevas < conteo_actual)[0]
-                detalles = [
-                    f"Cluster {i}: nuevo {int(cardinalidades_nuevas[i])} < asignados {int(conteo_actual[i])}"
-                    for i in idxs_problematicos 
+                    f"Cluster {i}: nuevo {int(nuevas[i])} < asignados {int(conteo_actual[i])}"
+                    for i in idxs_problematicos
                 ]
                 return {
                     "success": False,
                     "message": "Error: new sizes cannot be smaller than the points already assigned.",
-                    "data": detalles
+                    "data": detalles,
                 }
 
-
-
-            # ───────────── aplicar cambios (atómico) ─────────────
-
-            self.cardinalidades = cardinalidades_nuevas.copy()
+            self.cardinalidades = nuevas.copy()
             self.cupoRestante = (self.cardinalidades - conteo_actual).copy()
-            self.totalPuntos = int(np.sum(self.cardinalidades))
+            self._recalcular_estado_derivado()
 
             return {
                 "success": True,
@@ -352,16 +385,14 @@ class CORT:
                 "data": {
                     "cardinalidades": self.cardinalidades.copy(),
                     "cupoRestante": self.cupoRestante.copy(),
-                    "totalPuntos": self.totalPuntos
-                }
+                    "totalPuntos": self.totalPuntos,
+                },
             }
 
         except Exception as e:
-            print(f"Error al actualizar tamaños máximos: {e}")
+            print(f"Error al actualizar tamanios maximos: {e}")
             return {
                 "success": False,
                 "message": f"Unexpected error: {e}",
-                "data": None
+                "data": None,
             }
-
-

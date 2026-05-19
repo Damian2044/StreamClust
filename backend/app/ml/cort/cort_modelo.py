@@ -85,7 +85,11 @@ class CORTModelo:
     def _motivo_etiqueta_error(self) -> Dict[str, object]:
         """Determina causa probable de etiqueta de error devuelta por CORT."""
         k_fundados = int(self._modelo_cort.KFundados)
-        cupo_activo = np.asarray(self._modelo_cort.cupoRestante[:k_fundados], dtype=int)
+        fundados = getattr(self._modelo_cort, "fundados", None)
+        if fundados is not None:
+            cupo_activo = np.asarray(self._modelo_cort.cupoRestante[np.asarray(fundados, dtype=bool)], dtype=int)
+        else:
+            cupo_activo = np.asarray(self._modelo_cort.cupoRestante[:k_fundados], dtype=int)
         sin_espacio = bool(cupo_activo.size > 0 and np.all(cupo_activo <= 0))
         return {
             "motivo": "sin_espacio" if sin_espacio else "error_asignacion",
@@ -99,6 +103,12 @@ class CORTModelo:
         k_fundados = int(self._modelo_cort.KFundados)
         if k_fundados <= 0:
             return np.empty((0, 0), dtype=float)
+        fundados = getattr(self._modelo_cort, "fundados", None)
+        if fundados is not None:
+            centroides = np.asarray(self._modelo_cort.centroides, dtype=float)
+            if centroides.ndim != 2 or centroides.shape[1] == 0:
+                return np.empty((0, 0), dtype=float)
+            return centroides.copy()
         return np.asarray(self._modelo_cort.centroides[:k_fundados], dtype=float).copy()
 
     @property
@@ -209,15 +219,15 @@ class CORTModelo:
                     np.linalg.norm(punto - np.asarray(centroides_antes[etiqueta_asignada], dtype=float))
                 )
 
+            centroides_despues = self.centroides_activos
             self._metricas.registrar_resultado(
                 punto=punto,
                 etiqueta_asignada=etiqueta_asignada,
                 etiqueta_real=etiqueta_real,
-                num_activos=int(self._modelo_cort.KFundados),
+                num_activos=int(centroides_despues.shape[0]),
                 distancia_centroide_referencia=distancia_centroide_referencia,
             )
 
-            centroides_despues = self.centroides_activos
             tamanios_actuales = self.tamanios_actuales
             data = self._armar_data_respuesta(
                 etiqueta_asignada=etiqueta_asignada,
@@ -295,7 +305,7 @@ class CORTModelo:
                         usar_exactas=not bool(usar_aproximadas)
                     ),
                     "distribucion": self._calcular_distribucion(
-                        num_activos=int(self._modelo_cort.KFundados),
+                        num_activos=int(centroides_activos.shape[0]),
                         tamanios_actuales=tamanios_actuales,
                     ),
                     "tamanios_actuales": tamanios_actuales.copy(),
