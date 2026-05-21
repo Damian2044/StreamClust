@@ -479,6 +479,28 @@ function App() {
       });
     }
 
+    if (tabActiva === "datasets" || tabActiva === "texto") {
+      setProcessedImages((prev) => {
+        const siguientes = prev.filter((fila) => fila !== punto.filaOriginal);
+        if (siguientes.length === 0) {
+          resetVariablesSeleccionadas();
+        }
+        return siguientes;
+      });
+      setDatosProcesados((prev) =>
+        prev.some((item) => item.id === punto.id) ? prev : [...prev, punto]
+      );
+      setIdsEnClustering((prev) => {
+        if (!prev[punto.id]) {
+          return prev;
+        }
+
+        const siguiente = { ...prev };
+        delete siguiente[punto.id];
+        return siguiente;
+      });
+    }
+
     if (clusterAsignado !== null) {
       setAsignacionesClusters((prev) => ({ ...prev, [punto.id]: clusterAsignado }));
     }
@@ -592,6 +614,11 @@ function App() {
     setPanelConfiguracionVersion((prev) => prev + 1);
   };
 
+  const resetVariablesSeleccionadas = () => {
+    setVariablesSeleccionadas({ ...VARIABLES_SELECCIONADAS_INICIALES });
+    setVariablesPanelVersion((prev) => prev + 1);
+  };
+
   const detenerEjecucionClustering = () => {
     cancelAll();
     reset();
@@ -676,9 +703,9 @@ function App() {
         puntos = datos.map((fila, i) => ({
           id: crypto.randomUUID(),
           file: fila,
+          filaOriginal: processedImages[i],
           label: etiquetas[i] ?? null,
         }));
-        setDatosProcesados(puntos)
       } else {
         puntos = processedImages;
       }
@@ -831,9 +858,9 @@ function App() {
       todosPuntos = datos.map((fila, i) => ({
         id: crypto.randomUUID(),
         file: fila,
+        filaOriginal: processedImages[i],
         label: etiquetas[i] ?? null,
       }));
-      setDatosProcesados(prev => [...prev, ...todosPuntos])
     } else {
       todosPuntos = processedImages;
     }

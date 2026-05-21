@@ -23,13 +23,18 @@ function ModuloTexto({
     variablesSeleccionadas,
     variablesPanelVersion
 }) {
-    const columnasTexto = columnasDataset.filter((col, i) =>
-        datosDataset.some(fila => {
-            const v = fila[i];
-            return typeof v !== "number" || isNaN(v);
-        })
-    );
-    const columnasTarget = obtenerColumnasTargetValidas(columnasDataset, datosDataset);
+    const hayDatosPendientes = datosDataset.length > 0;
+    const columnasTexto = hayDatosPendientes
+        ? columnasDataset.filter((col, i) =>
+            datosDataset.some(fila => {
+                const v = fila[i];
+                return typeof v !== "number" || isNaN(v);
+            })
+        )
+        : [];
+    const columnasTarget = hayDatosPendientes
+        ? obtenerColumnasTargetValidas(columnasDataset, datosDataset)
+        : [];
     const ultimo_evento = Object.values(eventosClustering).at(-1)
     const distribucion = ultimo_evento?.distribucion
     const clusters = Object.fromEntries(
@@ -60,7 +65,7 @@ function ModuloTexto({
                 </div>
             </div>
             <GraficaClusters clusters={clusters}
-                totalInstancias={datosProcesados.length}
+                totalInstancias={datosDataset.length + datosProcesados.length}
                 procesadas={eventosClustering.length}
                 ultimoCluster={ultimo_cluster}
             />

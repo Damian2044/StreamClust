@@ -24,10 +24,15 @@ function ModuloDatos({
     variablesSeleccionadas,
     variablesPanelVersion
 }) {
-    const columnasNumericas = columnasDataset.filter((col, i) =>
-        datosDataset.every(fila => typeof fila[i] === "number" && !isNaN(fila[i]))
-    );
-    const columnasTarget = obtenerColumnasTargetValidas(columnasDataset, datosDataset);
+    const hayDatosPendientes = datosDataset.length > 0;
+    const columnasNumericas = hayDatosPendientes
+        ? columnasDataset.filter((col, i) =>
+            datosDataset.every(fila => typeof fila[i] === "number" && !isNaN(fila[i]))
+        )
+        : [];
+    const columnasTarget = hayDatosPendientes
+        ? obtenerColumnasTargetValidas(columnasDataset, datosDataset)
+        : [];
     const ultimo_evento = Object.values(eventosClustering).at(-1)
     const distribucion = ultimo_evento?.distribucion
     const clusters = Object.fromEntries(
@@ -58,7 +63,7 @@ function ModuloDatos({
                 </div>
             </div>
             <GraficaClusters clusters={clusters}
-                totalInstancias={datosProcesados.length}
+                totalInstancias={datosDataset.length + datosProcesados.length}
                 procesadas={eventosClustering.length}
                 ultimoCluster={ultimo_cluster}
             />

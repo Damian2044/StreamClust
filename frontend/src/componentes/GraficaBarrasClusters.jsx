@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import { useState } from 'react';
 import TablaCapacidadClusters from "./TablaCapacidad";
@@ -25,7 +25,9 @@ function GraficaClusters({
         ])
     )
     const nombresClusters = Object.keys(data_grafica);
-    const valoresClusters = Object.values(data_grafica);
+    const valoresClusters = Object.values(data_grafica).map((valor) => Number(valor) || 0);
+    const firmaGrafica = `${nombresClusters.join("|")}::${valoresClusters.join("|")}::${totalInstancias}`;
+    const anchoMinimoGrafica = Math.max(640, nombresClusters.length * 72);
 
 
 
@@ -109,8 +111,8 @@ function GraficaClusters({
             },
         ],
         grid: {
-            left: "6%",
-            right: "6%",
+            left: 72,
+            right: 32,
             bottom: "22%",
             containLabel: true,
         },
@@ -120,6 +122,23 @@ function GraficaClusters({
         ? Math.round((procesadas / totalInstancias) * 100)
         : 0;
     const [abierta, setAbierta] = useState(true);
+    const graficaRef = useRef(null);
+
+    useEffect(() => {
+        const instancia = graficaRef.current?.getEchartsInstance?.();
+        if (!instancia) {
+            return undefined;
+        }
+
+        const timer = window.setTimeout(() => {
+            instancia.clear();
+            instancia.setOption(option, true);
+            instancia.resize();
+        }, 0);
+
+        return () => window.clearTimeout(timer);
+    }, [firmaGrafica, abierta, anchoMinimoGrafica]);
+
     return (
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow relative mt-4">
 
@@ -154,7 +173,7 @@ function GraficaClusters({
             <div
                 className={`
                     transition-all duration-500 ease-in-out overflow-hidden
-                    ${abierta ? "max-h-[900px] opacity-100" : "max-h-0 opacity-0"}
+                    ${abierta ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0"}
                 `}
             >
                 <div className="flex flex-col gap-6 p-5 xl:flex-row">
@@ -165,8 +184,14 @@ function GraficaClusters({
                             Cluster Distribution
                         </h3>
 
-                        <div className="min-w-0 overflow-hidden">
-                            <ReactECharts option={option} style={{ height: 360, width: "100%" }} />
+                        <div className="min-w-0 overflow-x-auto overflow-y-hidden pb-2 custom-scrollbar">
+                            <div style={{ width: `max(100%, ${anchoMinimoGrafica}px)` }}>
+                                <ReactECharts
+                                    ref={graficaRef}
+                                    option={option}
+                                    style={{ height: 360, width: "100%" }}
+                                />
+                            </div>
                         </div>
                     </div>
 

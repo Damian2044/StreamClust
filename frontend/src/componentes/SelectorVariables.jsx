@@ -5,6 +5,7 @@ const SECTION_TITLE_CLASS = "mb-2 text-sm font-semibold text-slate-600";
 const CHIP_BASE_CLASS = "inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold leading-none tracking-[0.01em] shadow-sm";
 const SELECT_BASE_CLASS = "rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[13px] font-semibold text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200";
 const COMPACT_SELECT_CLASS = `${SELECT_BASE_CLASS} w-full sm:w-[12rem]`;
+const BULK_BUTTON_CLASS = "rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50";
 
 function VariablesPanel({
     columnasNumericas = [],
@@ -30,14 +31,17 @@ function VariablesPanel({
     const [features, setFeatures] = useState(() => obtenerFeaturesIniciales());
     const [target, setTarget] = useState("");
     const [featurePendiente, setFeaturePendiente] = useState("");
+    const [featuresLimpiadasManualmente, setFeaturesLimpiadasManualmente] = useState(false);
     const featuresDisponibles = columnasNumericas.filter((c) => !features.includes(c) && c !== target);
     const targetsDisponibles = columnasEtiquetas.filter((col) => !features.includes(col));
+    const hayMuchasFeatures = features.length > 8;
 
     useEffect(() => {
         const iniciales = obtenerFeaturesIniciales();
         setFeatures(iniciales);
         setTarget("");
         setFeaturePendiente("");
+        setFeaturesLimpiadasManualmente(false);
         onChange?.({ features: iniciales, target: "" });
     }, [resetVersion]);
 
@@ -46,12 +50,13 @@ function VariablesPanel({
             setFeatures([]);
             setTarget("");
             setFeaturePendiente("");
-        } else if (features.length === 0 && columnasNumericas.length >= 1) {
+            setFeaturesLimpiadasManualmente(false);
+        } else if (features.length === 0 && columnasNumericas.length >= 1 && !featuresLimpiadasManualmente) {
             const iniciales = obtenerFeaturesIniciales();
             setFeatures(iniciales);
             onChange?.({ features: iniciales, target });
         }
-    }, [columnasNumericas, features.length, onChange, seleccionarTodasLasFeaturesInicialmente, soloUnaFeature, target]);
+    }, [columnasNumericas, features.length, featuresLimpiadasManualmente, onChange, seleccionarTodasLasFeaturesInicialmente, soloUnaFeature, target]);
 
     useEffect(() => {
         if (target && !columnasEtiquetas.includes(target)) {
@@ -68,12 +73,14 @@ function VariablesPanel({
         const nuevas = soloUnaFeature ? [col] : [...features, col];
         setFeatures(nuevas);
         setFeaturePendiente("");
+        setFeaturesLimpiadasManualmente(false);
         onChange?.({ features: nuevas, target });
     };
 
     const quitarFeature = (col) => {
         const nuevas = features.filter((f) => f !== col);
         setFeatures(nuevas);
+        setFeaturesLimpiadasManualmente(nuevas.length === 0);
         onChange?.({ features: nuevas, target });
     };
 
@@ -81,12 +88,28 @@ function VariablesPanel({
         const nuevas = features.filter((f) => f !== col);
         setTarget(col);
         setFeatures(nuevas);
+        setFeaturesLimpiadasManualmente(nuevas.length === 0);
         onChange?.({ features: nuevas, target: col });
     };
 
     const limpiarTarget = () => {
         setTarget("");
         onChange?.({ features, target: "" });
+    };
+
+    const seleccionarTodasLasFeatures = () => {
+        const nuevas = columnasNumericas.filter((col) => col !== target);
+        setFeatures(nuevas);
+        setFeaturePendiente("");
+        setFeaturesLimpiadasManualmente(false);
+        onChange?.({ features: nuevas, target });
+    };
+
+    const limpiarFeatures = () => {
+        setFeatures([]);
+        setFeaturePendiente("");
+        setFeaturesLimpiadasManualmente(true);
+        onChange?.({ features: [], target });
     };
 
     return (
@@ -120,18 +143,23 @@ function VariablesPanel({
             <div
                 className={`
                     transition-all duration-500 ease-in-out overflow-hidden
-                    ${abierta ? "max-h-[900px] opacity-100" : "max-h-0 opacity-0"}
+                    ${abierta ? "max-h-[720px] opacity-100" : "max-h-0 opacity-0"}
                 `}
             >
                 <div className="px-5 py-4 space-y-4 bg-gray-50">
                     {/* FEATURES */}
                     <div>
-                        <p className={SECTION_TITLE_CLASS}>
-                            Features (X variables):
-                        </p>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-slate-600">
+                                Features (X variables)
+                            </p>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                                {features.length}
+                            </span>
+                        </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                            <div className="flex min-h-[3.25rem] flex-wrap items-center gap-2">
+                            <div className={`flex min-h-[3.25rem] flex-wrap items-center gap-2 pr-1 ${hayMuchasFeatures ? "max-h-36 overflow-y-auto custom-scrollbar" : ""}`}>
                             {features.map((col) => (
                                 <span
                                     key={col}
@@ -155,7 +183,7 @@ function VariablesPanel({
                             )}
                             </div>
 
-                            <div className="mt-3 border-t border-slate-100 pt-3">
+                            <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
                                 <select
                                     value={featurePendiente}
                                     onChange={(e) => {
@@ -169,6 +197,26 @@ function VariablesPanel({
                                     <option value="">Add</option>
                                     {featuresDisponibles.map((col) => <option key={col} value={col}>{col}</option>)}
                                 </select>
+                                {!soloUnaFeature && columnasNumericas.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={seleccionarTodasLasFeatures}
+                                            className={BULK_BUTTON_CLASS}
+                                            disabled={features.length === columnasNumericas.filter((col) => col !== target).length}
+                                        >
+                                            Select all
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={limpiarFeatures}
+                                            className={BULK_BUTTON_CLASS}
+                                            disabled={features.length === 0}
+                                        >
+                                            Clear X
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
