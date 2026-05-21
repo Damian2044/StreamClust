@@ -1,3 +1,4 @@
+import { useState } from "react";
 import TablaDataset from "../../componentes/DatesetVisualizacion";
 import VisualizacionClustering from "../../componentes/VisualizacionClustering";
 import PanelEventosClustering from "../../componentes/PanelEventosClustering";
@@ -24,6 +25,9 @@ function ModuloDatos({
     variablesSeleccionadas,
     variablesPanelVersion
 }) {
+    const [datasetAbierto, setDatasetAbierto] = useState(true);
+    const [variablesAbierto, setVariablesAbierto] = useState(true);
+    const panelSuperiorAbierto = datasetAbierto || variablesAbierto;
     const hayDatosPendientes = datosDataset.length > 0;
     const columnasNumericas = hayDatosPendientes
         ? columnasDataset.filter((col, i) =>
@@ -43,13 +47,15 @@ function ModuloDatos({
     const ultimo_cluster = Object.values(asignacionesClusters).at(-1)
     return (
         <>
-            <div className="flex w-full flex-col gap-4 xl:flex-row">
+            <div className={`flex w-full flex-col gap-4 xl:flex-row xl:items-stretch ${panelSuperiorAbierto ? "xl:min-h-[28rem]" : ""}`}>
                 <div className="min-w-0 flex-1">
                     <TablaDataset
                         titulo={titulo_Galeria}
                         datos={datosDataset}
                         columnas={columnasDataset}
                         onLimpiarTodo={() => limpiarData()}
+                        className="h-full"
+                        onToggleAbierta={setDatasetAbierto}
                     />
                 </div>
 
@@ -59,6 +65,8 @@ function ModuloDatos({
                         columnasEtiquetas={columnasTarget}
                         onChange={setVariablesSeleccionadas}
                         resetVersion={variablesPanelVersion}
+                        className="h-full"
+                        onToggleAbierta={setVariablesAbierto}
                         seleccionarTodasLasFeaturesInicialmente={true} />
                 </div>
             </div>

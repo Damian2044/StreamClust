@@ -13,7 +13,9 @@ function VariablesPanel({
     onChange,
     soloUnaFeature = false,
     seleccionarTodasLasFeaturesInicialmente = false,
-    resetVersion = 0
+    resetVersion = 0,
+    className = "",
+    onToggleAbierta
 }) {
     const obtenerFeaturesIniciales = () => {
         if (soloUnaFeature) {
@@ -113,13 +115,19 @@ function VariablesPanel({
     };
 
     return (
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow relative">
+        <div className={`bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow relative ${abierta ? className : ""}`}>
             {/* Header (igual que tu componente) */}
             <div className="h-10 bg-gray-100 border-b border-gray-200 flex items-center justify-between px-5 shrink-0 z-20">
                 <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                     <button
                         type="button"
-                        onClick={() => setAbierta((prev) => !prev)}
+                        onClick={() => {
+                            setAbierta((prev) => {
+                                const siguiente = !prev;
+                                onToggleAbierta?.(siguiente);
+                                return siguiente;
+                            });
+                        }}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-300 transition-colors"
                         title={abierta ? 'Close panel' : 'Open panel'}
                     >
@@ -142,11 +150,11 @@ function VariablesPanel({
 
             <div
                 className={`
-                    transition-all duration-500 ease-in-out overflow-hidden
+                    transition-all duration-500 ease-in-out overflow-hidden flex flex-col
                     ${abierta ? "max-h-[720px] opacity-100" : "max-h-0 opacity-0"}
                 `}
             >
-                <div className="px-5 py-4 space-y-4 bg-gray-50">
+                <div className="flex-1 px-5 py-4 space-y-4 bg-gray-50">
                     {/* FEATURES */}
                     <div>
                         <div className="mb-2 flex items-center justify-between gap-3">

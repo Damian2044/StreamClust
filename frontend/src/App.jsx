@@ -23,6 +23,8 @@ import Papa from 'papaparse';
 
 const DELIMITADOR_POR_DEFECTO = "auto";
 const VARIABLES_SELECCIONADAS_INICIALES = { features: [], target: "" };
+const ORDEN_ENVIO_POR_DEFECTO = { modo: "semilla", semilla: "42" };
+const MOSTRAR_SELECTOR_SEMILLA = import.meta.env.VITE_MOSTRAR_SEED !== "false";
 const crearParametrosClusterPorDefecto = () => ({
   k: 3,
   maxSizes: [10, 10, 10],
@@ -61,12 +63,15 @@ function App() {
   const [variablesSeleccionadas, setVariablesSeleccionadas] = useState({ ...VARIABLES_SELECCIONADAS_INICIALES });
   const [variablesPanelVersion, setVariablesPanelVersion] = useState(0);
   const [panelConfiguracionVersion, setPanelConfiguracionVersion] = useState(0);
+  const [ordenEnvio, setOrdenEnvio] = useState({ ...ORDEN_ENVIO_POR_DEFECTO });
   const [datosProcesados, setDatosProcesados] = useState([])
 
   // --- ESTADOS CLUSTERING ---
   const [isClustering, setIsClustering] = useState(false);
+  const [estaProcesandoEnvio, setEstaProcesandoEnvio] = useState(false);
   const [clusterPoints, setClusterPoints] = useState([]);
   const [initialMaxSizes, setInitialMaxSizes] = useState([]);
+  const [dimensionFeaturesInicial, setDimensionFeaturesInicial] = useState(null);
   const [incomingQueue, setIncomingQueue] = useState([]);
   const [idSesionClustering, setIdSesionClustering] = useState(null);
   const [eventosClustering, setEventosClustering] = useState([]);
@@ -112,8 +117,6 @@ function App() {
 
   const [clusterParams, setClusterParams] = useState(() => crearParametrosClusterPorDefecto());
 
-  const semillaGlobal = 42;
-
   const crearGeneradorSemilla = (semilla) => {
     let m = 2147483647; // 2^31 - 1
     let a = 1103515245;
@@ -133,6 +136,19 @@ function App() {
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     return arr;
+  };
+
+  const obtenerPuntosEnOrdenDeEnvio = (puntos) => {
+    if (!MOSTRAR_SELECTOR_SEMILLA) {
+      return barajarConSemilla(puntos, 42);
+    }
+
+    if (ordenEnvio.modo === "original") {
+      return [...puntos];
+    }
+
+    const semilla = Number.parseInt(ordenEnvio.semilla, 10);
+    return barajarConSemilla(puntos, Number.isFinite(semilla) ? semilla : 42);
   };
 
   // --- FUNCIONES AUXILIARES ---
@@ -420,6 +436,7 @@ function App() {
   };
 
   const handleMaxSizeChange = (index, newVal) => {
+    if (estaProcesandoEnvio) return;
     const valorParseado = parseInt(newVal);
     const referenciaMinima = isClustering ? (initialMaxSizes[index] ?? 1) : 1;
     const val = Number.isFinite(valorParseado) ? Math.max(valorParseado, referenciaMinima) : referenciaMinima;
@@ -593,6 +610,7 @@ function App() {
 
   const resetClusteringRuntimeStates = () => {
     setIsClustering(false);
+    setEstaProcesandoEnvio(false);
     setClusterPoints([]);
     setSelectedImageIds([]);
     setBulkLabelInput("");
@@ -606,6 +624,7 @@ function App() {
     setProyeccionPCA([]);
     setDatosProcesados([]);
     setInitialMaxSizes([]);
+    setDimensionFeaturesInicial(null);
     lastSelectedIndexRef.current = null;
   };
 
@@ -669,6 +688,10 @@ function App() {
     }
 
     // CASO 2: INICIAR (Validación)
+    let puntosEnviados = 0;
+    let totalPuntosAEnviar = 0;
+    let envioCancelado = false;
+
     if (processedImages.length < 1) {
       addError("You must load data first.", "warning");
       return;
@@ -678,8 +701,14 @@ function App() {
     }
 
     // Preparación de inicio
-    setInitialMaxSizes([...clusterParams.maxSizes]);
+      setInitialMaxSizes([...clusterParams.maxSizes]);
+    setDimensionFeaturesInicial(
+      requiereVariablesX()
+        ? variablesSeleccionadas.features.length
+        : null
+    );
     setIsClustering(true);
+    setEstaProcesandoEnvio(true);
     reset(); // Resetear el abort controller para una nueva sesión
 
     try {
@@ -711,7 +740,8 @@ function App() {
       }
 
       // ── Loop idéntico para ambos casos ─────────────────────
-      const puntosBarajados = barajarConSemilla(puntos, semillaGlobal);
+      const puntosBarajados = obtenerPuntosEnOrdenDeEnvio(puntos);
+      totalPuntosAEnviar = puntosBarajados.length;
 
 
 
@@ -720,6 +750,7 @@ function App() {
         const signal = getAbortSignal();
         if (signal.aborted) {
           console.log('Clustering cancelado por usuario');
+          envioCancelado = true;
           break;
         }
 
@@ -731,16 +762,22 @@ function App() {
         try {
           const resPunto = await enviarPuntoAlServicio(punto, sesionId, tabActiva, signal);
           actualizarEstadoConRespuestaClustering(punto, resPunto);
+          puntosEnviados += 1;
 
         } catch (e) {
           // Si fue cancelado por usuario, salir del loop
           if (esErrorCancelado(e)) {
             console.log('Solicitud cancelada para punto:', punto.id);
+            envioCancelado = true;
             break;
           }
           manejarErrorFatalClustering(e, `Could not process point ${punto.id}.`);
           return;
         }
+      }
+
+      if (!envioCancelado) {
+        addError(`Initial data sending completed (${puntosEnviados}/${totalPuntosAEnviar}).`, 'success');
       }
     } catch (error) {
       // Si fue cancelado, no mostrar error (fue intencional del usuario)
@@ -749,11 +786,13 @@ function App() {
         return;
       }
       manejarErrorFatalClustering(error, 'Could not start or continue clustering.');
+    } finally {
+      setEstaProcesandoEnvio(false);
     }
   };
 
   const confirmarAumentoTamanios = async () => {
-    if (!isClustering || !idSesionClustering) return;
+    if (!isClustering || !idSesionClustering || estaProcesandoEnvio) return;
 
     // Validación frontend: solo permitir subir (o mantener) respecto al límite vigente
     if (Array.isArray(initialMaxSizes) && initialMaxSizes.length === clusterParams.maxSizes.length) {
@@ -842,11 +881,27 @@ function App() {
   };
 
   const enviarNuevasImagenesAlClustering = async () => {
-    if (!isClustering || !idSesionClustering) return;
+    if (!isClustering || !idSesionClustering || estaProcesandoEnvio) return;
 
     if (!asegurarVariablesXSeleccionadas('send')) {
       return;
     }
+
+    if (
+      requiereVariablesX() &&
+      dimensionFeaturesInicial !== null &&
+      variablesSeleccionadas.features.length !== dimensionFeaturesInicial
+    ) {
+      addError(
+        `New data must use ${dimensionFeaturesInicial} X variable(s), but ${variablesSeleccionadas.features.length} are selected.`,
+        'warning'
+      );
+      return;
+    }
+
+    let puntosEnviados = 0;
+    let totalPuntosAEnviar = 0;
+    let envioCancelado = false;
 
     try {
 
@@ -871,12 +926,15 @@ function App() {
       return;
     }
 
-    const puntosAEnviar = barajarConSemilla(todosPuntos, semillaGlobal);
+    setEstaProcesandoEnvio(true);
+    const puntosAEnviar = obtenerPuntosEnOrdenDeEnvio(todosPuntos);
+    totalPuntosAEnviar = puntosAEnviar.length;
 
     for (const punto of puntosAEnviar) {
       const signal = getAbortSignal();
       if (signal.aborted) {
         console.log('Envío cancelado');
+        envioCancelado = true;
         break;
       }
 
@@ -887,15 +945,21 @@ function App() {
       try {
         const resPunto = await enviarPuntoAlServicio(punto, idSesionClustering, tabActiva, signal);
         actualizarEstadoConRespuestaClustering(punto, resPunto);
+        puntosEnviados += 1;
 
       } catch (e) {
         if (esErrorCancelado(e)) {
           console.log('Solicitud cancelada para punto:', punto.id);
+          envioCancelado = true;
           break;
         }
         manejarErrorFatalClustering(e, `Could not add point ${punto.id} to clustering.`);
         return;
       }
+    }
+
+    if (!envioCancelado) {
+      addError(`New data sending completed (${puntosEnviados}/${totalPuntosAEnviar}).`, 'success');
     }
     } catch (error) {
       if (esErrorCancelado(error)) {
@@ -904,6 +968,8 @@ function App() {
       }
 
       manejarErrorFatalClustering(error, 'Could not prepare the new data for clustering.');
+    } finally {
+      setEstaProcesandoEnvio(false);
     }
   };
 
@@ -1015,6 +1081,7 @@ function App() {
           <PanelConfiguracion
             resetVersion={panelConfiguracionVersion}
             estaClustering={isClustering}
+            estaProcesandoEnvio={estaProcesandoEnvio}
             parametrosCluster={clusterParams}
             tamaniosIniciales={initialMaxSizes}
             onCambiarK={handleKChange}
@@ -1023,6 +1090,9 @@ function App() {
             onToggleClustering={toggleClustering}
             onAumentarTamanios={confirmarAumentoTamanios}
             onEnviarNuevosDatos={enviarNuevasImagenesAlClustering}
+            ordenEnvio={ordenEnvio}
+            onCambiarOrdenEnvio={setOrdenEnvio}
+            mostrarSelectorSemilla={MOSTRAR_SELECTOR_SEMILLA}
           />
         </div>
       </div>

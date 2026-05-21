@@ -1,5 +1,7 @@
 import React from 'react'
 
+const MOSTRAR_DUNN = import.meta.env.VITE_MOSTRAR_DUNN !== 'false'
+
 function PanelEventosClustering({ eventos }) {
   const [abierto, setAbierto] = React.useState(true)
   const ultimo = eventos.length > 0 ? eventos[eventos.length - 1] : null
@@ -60,12 +62,14 @@ function PanelEventosClustering({ eventos }) {
                       {(metricasInternas.silueta ?? 0).toFixed?.(3)}
                     </span>
                   </p>
-                  <p>
-                    Dunn{' '}
-                    <span className="font-semibold text-cyan-600 text-xl">
-                      {(metricasInternas.dunn ?? 0).toFixed?.(3)}
-                    </span>
-                  </p>
+                  {MOSTRAR_DUNN && (
+                    <p>
+                      Dunn{' '}
+                      <span className="font-semibold text-cyan-600 text-xl">
+                        {(metricasInternas.dunn ?? 0).toFixed?.(3)}
+                      </span>
+                    </p>
+                  )}
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-200 p-4">

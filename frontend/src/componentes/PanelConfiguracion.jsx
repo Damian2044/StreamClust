@@ -4,6 +4,7 @@ import { ExclamationTriangleIcon, LockClosedIcon } from '@heroicons/react/24/out
 function PanelConfiguracion({
   resetVersion,
   estaClustering,
+  estaProcesandoEnvio = false,
   parametrosCluster,
   tamaniosIniciales,
   onCambiarK,
@@ -12,9 +13,13 @@ function PanelConfiguracion({
   onToggleClustering,
   onAumentarTamanios,
   onEnviarNuevosDatos,
+  ordenEnvio,
+  onCambiarOrdenEnvio,
+  mostrarSelectorSemilla = false,
 }) {
   const [tamanoComun, setTamanoComun] = React.useState('100');
   const EstadoIcono = estaClustering ? LockClosedIcon : ExclamationTriangleIcon;
+  const controlesEnvioBloqueados = estaProcesandoEnvio;
 
   React.useEffect(() => {
     setTamanoComun('100');
@@ -54,16 +59,67 @@ function PanelConfiguracion({
             >
               <EstadoIcono className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                {estaClustering
-                  ? 'Safe Mode: Parameters are locked.'
+                {estaProcesandoEnvio
+                  ? 'Processing data: sending controls are temporarily locked.'
+                  : estaClustering
+                  ? 'Safe Mode: cluster count is locked.'
                   : 'Set the parameters before starting clustering.'}
               </span>
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
+            {/* Orden de envío */}
+            {mostrarSelectorSemilla && (
+            <div className="order-4">
+              <label className="text-[11px] text-slate-500 font-semibold block mb-2">
+                Data Sending Order
+              </label>
+
+              <div className={`grid grid-cols-2 rounded-lg border border-slate-200 bg-white p-1 text-[11px] font-semibold ${controlesEnvioBloqueados ? 'opacity-60' : ''}`}>
+                <button
+                  type="button"
+                  title="Send data in the same order it was loaded."
+                  disabled={controlesEnvioBloqueados}
+                  onClick={() => onCambiarOrdenEnvio?.((prev) => ({ ...prev, modo: 'original' }))}
+                  className={`rounded-md px-2 py-1.5 transition ${ordenEnvio?.modo === 'original'
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                >
+                  Original
+                </button>
+                <button
+                  type="button"
+                  title="Shuffle data using the configured seed before sending."
+                  disabled={controlesEnvioBloqueados}
+                  onClick={() => onCambiarOrdenEnvio?.((prev) => ({ ...prev, modo: 'semilla' }))}
+                  className={`rounded-md px-2 py-1.5 transition ${ordenEnvio?.modo !== 'original'
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                >
+                  Seeded
+                </button>
+              </div>
+
+              <input
+                type="number"
+                title="Seed used to generate a reproducible shuffled sending order."
+                value={ordenEnvio?.semilla ?? '42'}
+                onChange={(e) => onCambiarOrdenEnvio?.((prev) => ({ ...prev, semilla: e.target.value }))}
+                disabled={controlesEnvioBloqueados || ordenEnvio?.modo === 'original'}
+                className={`mt-2 w-full border rounded-lg px-3 py-2 text-sm outline-none transition ${controlesEnvioBloqueados || ordenEnvio?.modo === 'original'
+                  ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'border-slate-200 focus:border-blue-300 bg-white'
+                  }`}
+                placeholder="e.g. 42"
+              />
+            </div>
+            )}
+
             {/* K */}
-            <div>
+            <div className="order-1">
               <label className="text-[11px] text-slate-500 font-semibold block mb-1">
                 Number of Clusters (k)
               </label>
@@ -81,7 +137,7 @@ function PanelConfiguracion({
             </div>
 
             {/* Tamaños */}
-            <div>
+            <div className="order-3">
               <label className="text-[11px] text-slate-500 font-semibold block mb-2">
                 Maximum Size per Cluster
               </label>
@@ -121,10 +177,13 @@ function PanelConfiguracion({
                       type="number"
                       min={estaClustering ? (tamaniosIniciales?.[indice] ?? 1) : 1}
                       value={tamano}
+                      disabled={estaProcesandoEnvio}
                       onChange={(e) =>
                         onCambiarTamanoMaximo(indice, e.target.value)
                       }
-                      className={`flex-1 border rounded px-2 py-1.5 text-xs outline-none ${estaClustering
+                      className={`flex-1 border rounded px-2 py-1.5 text-xs outline-none ${estaProcesandoEnvio
+                        ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : estaClustering
                         ? 'border-emerald-200 bg-emerald-50'
                         : 'border-slate-200 focus:border-blue-300'
                         }`}
@@ -138,6 +197,7 @@ function PanelConfiguracion({
           {/* BOTON PRINCIPAL */}
           <button
             onClick={onToggleClustering}
+            title={estaClustering ? 'Stop the current online clustering session.' : 'Start clustering and send the pending data.'}
             className={`w-full mt-6 font-semibold py-3 rounded-xl transition ${estaClustering
               ? 'bg-rose-100 text-rose-600 hover:bg-rose-200'
               : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
@@ -151,15 +211,25 @@ function PanelConfiguracion({
               <button
                 type="button"
                 onClick={onEnviarNuevosDatos}
-                className="w-full text-[12px] font-semibold py-2 rounded-lg border border-emerald-200 text-emerald-600 hover:bg-emerald-50 transition"
+                title="Send the currently pending data to the active clustering session."
+                disabled={controlesEnvioBloqueados}
+                className={`w-full text-[12px] font-semibold py-2 rounded-lg border transition ${controlesEnvioBloqueados
+                  ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'border-emerald-200 text-emerald-600 hover:bg-emerald-50'
+                  }`}
               >
-                Send new data to clustering
+                {estaProcesandoEnvio ? 'Sending data...' : 'Send new data to clustering'}
               </button>
 
               <button
                 type="button"
                 onClick={onAumentarTamanios}
-                className="w-full text-[12px] font-semibold py-2 rounded-lg border border-sky-200 text-sky-600 hover:bg-sky-50 transition"
+                title="Apply the updated maximum cluster sizes to the active session."
+                disabled={controlesEnvioBloqueados}
+                className={`w-full text-[12px] font-semibold py-2 rounded-lg border transition ${controlesEnvioBloqueados
+                  ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'border-sky-200 text-sky-600 hover:bg-sky-50'
+                  }`}
               >
                 Increase cluster size
               </button>

@@ -7,6 +7,8 @@ function TablaDataset({
     datos = [],
     columnas = [],
     onLimpiarTodo,
+    className = "",
+    onToggleAbierta,
 }) {
     const [abierta, setAbierta] = useState(true);
 
@@ -21,13 +23,19 @@ function TablaDataset({
     }
 
     return (
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow relative">
+        <div className={`bg-white border border-gray-200 rounded-2xl overflow-hidden flex flex-col shadow relative ${abierta ? className : ""}`}>
             {/* Header */}
             <div className="h-10 bg-gray-100 border-b border-gray-200 flex items-center justify-between px-4 shrink-0 z-20 relative">
                 <span className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
                     <button
                         type="button"
-                        onClick={() => setAbierta((prev) => !prev)}
+                        onClick={() => {
+                            setAbierta((prev) => {
+                                const siguiente = !prev;
+                                onToggleAbierta?.(siguiente);
+                                return siguiente;
+                            });
+                        }}
                         className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-300 transition-colors"
                         title={abierta ? 'Close gallery' : 'Open gallery'}
                     >
@@ -58,12 +66,12 @@ function TablaDataset({
             {/* Tabla */}
             <div
                 className={`
-                    transition-all duration-500 ease-in-out overflow-hidden
+                    transition-all duration-500 ease-in-out overflow-hidden flex flex-col
                     ${abierta ? "max-h-[900px] opacity-100" : "max-h-0 opacity-0"}
                 `}
             >
 
-                <div className="max-h-[420px] overflow-auto custom-scrollbar bg-gray-50 p-2">
+                <div className="max-h-[420px] flex-1 overflow-auto custom-scrollbar bg-gray-50 p-2">
                     {datos.length === 0 ? (
                         <div className="h-60 flex flex-col items-center justify-center opacity-40">
                             <TableCellsIcon className="mb-2 h-12 w-12 text-gray-400" />
